@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import { InvalidAmountError, MissingRateError } from "./errors";
+import { parseRate } from "./fixed";
+import { money } from "./money";
+import { replayWallet, type WalletEvent } from "./wallet";
+
+const t = (day: number, hour = 0) =>
+  `2026-11-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:00:00.000Z`;
+
+const contribute = (id: string, memberId: string, yen: bigint, cost: bigint, at: string): WalletEvent => ({
+  kind: "contribution",
+  id,
+  memberId,
+  occurredAt: at,
+  createdAt: at,
+  amount: money(yen, "JPY"),
+  baseCost: cost,
+});
+
+const spend = (id: string, yen: bigint, at: string, overdraft: string | null = null): WalletEvent => ({
+  kind: "spend",
+  id,
+  occurredAt: at,
+  createdAt: at,
+  amount: money(yen, "JPY"),
+  overdraftRate: overdraft === null ? null : parseRate(overdraft, 100),
+});
+
+describe("replayWallet", () => {
+  it("이동평균 원가로 차감하고 원가가 보존된다", () => {
+    const r = replayWallet(
+      [
+        contribute("c1", "A", 20_000n, 180_000n, t(1)),
+        contribute("c2", "C", 20_000n, 182_000n, t(1)),
+        spend("s1", 10_000n, t(2)),
+      ],
+      "KRW",
+    );
+    expect(r.spendCosts.get("s1")).toBe(90_500n);
+    expect(r.pools.get("JPY")).toEqual({ foreignMinor: 30_000n, costMinor: 271_500n });
+    expect(r.overdrawn).toEqual([]);
+  });
+
+  it("잔액을 정확히 다 쓰면 남은 원가 전부가 그 지출의 원가", () => {
+    const r = replayWallet(
+      [contribute("c1", "A", 3n, 10n, t(1)), spend("s1", 1n, t(2)), spend("s2", 2n, t(3))],
+      "KRW",
+    );
+    expect(r.spendCosts.get("s1")! + r.spendCosts.get("s2")!).toBe(10n);
+    expect(r.pools.get("JPY")).toEqual({ foreignMinor: 0n, costMinor: 0n });
+  });
+
+  it("입력 배열 순서가 아니라 occurredAt → createdAt → id 순으로 적용", () => {
+    const events = [
+      spend("s1", 10_000n, t(3)),
+      contribute("c2", "C", 20_000n, 182_000n, t(2)),
+      contribute("c1", "A", 20_000n, 180_000n, t(1)),
+    ];
+    expect(replayWallet(events, "KRW").spendCosts.get("s1")).toBe(90_500n);
+  });
+
+  it("잔액 부족: 남은 잔액은 풀 원가, 초과분은 API 환율, 경고 목록에 남김", () => {
+    const r = replayWallet(
+      [contribute("c1", "A", 1_000n, 9_000n, t(1)), spend("s1", 3_000n, t(2), "1000")],
+      "KRW",
+    );
+    expect(r.spendCosts.get("s1")).toBe(9_000n + 20_000n);
+    expect(r.pools.get("JPY")).toEqual({ foreignMinor: -2_000n, costMinor: -20_000n });
+    expect(r.overdrawn).toEqual(["s1"]);
+  });
+
+  it("잔액 부족인데 API 환율이 없으면 MissingRateError", () => {
+    expect(() => replayWallet([spend("s1", 1n, t(1))], "KRW")).toThrow(MissingRateError);
+  });
+
+  it("0 이하 금액은 거부", () => {
+    expect(() => replayWallet([contribute("c1", "A", 0n, 0n, t(1))], "KRW")).toThrow(
+      InvalidAmountError,
+    );
+  });
+
+  it("통화별로 풀이 따로 있다", () => {
+    const r = replayWallet(
+      [
+        contribute("c1", "A", 1_000n, 9_000n, t(1)),
+        {
+          kind: "contribution",
+          id: "c2",
+          memberId: "A",
+          occurredAt: t(1),
+          createdAt: t(1),
+          amount: money(10_000n, "USD"),
+          baseCost: 140_000n,
+        },
+      ],
+      "KRW",
+    );
+    expect(r.pools.get("JPY")).toEqual({ foreignMinor: 1_000n, costMinor: 9_000n });
+    expect(r.pools.get("USD")).toEqual({ foreignMinor: 10_000n, costMinor: 140_000n });
+  });
+});
