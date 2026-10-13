@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { computeBalances, type ExpenseInput, type TripInput } from "./balance";
+import { SettlementInvariantError } from "./errors";
 import { parseRate } from "./fixed";
 import { money } from "./money";
 import { settle, verifySettlement } from "./settle";
@@ -65,17 +66,23 @@ const tripArb: fc.Arbitrary<TripInput> = fc
   }));
 
 describe("속성", () => {
-  it("순잔액 합 = 0, 그리디 송금을 반영하면 모두 0", () => {
+  it("Σ순잔액 + Σ미충당 부족분 = 0, 부족분이 없으면 그리디 송금으로 모두 0, 있으면 정산 거부", () => {
     fc.assert(
       fc.property(tripArb, (trip) => {
         const r = computeBalances(trip);
-        expect([...r.balances.values()].reduce((s, v) => s + v, 0n)).toBe(0n);
-        expect(verifySettlement(r.balances, settle(r.balances, r.memberOrder))).toBe(true);
+        const sum = [...r.balances.values()].reduce((s, v) => s + v, 0n);
+        const unfunded = r.unfunded.reduce((s, u) => s + u.costMinor, 0n);
+        expect(sum + unfunded).toBe(0n);
+        if (unfunded === 0n) {
+          expect(verifySettlement(r.balances, settle(r.balances, r.memberOrder))).toBe(true);
+        } else {
+          expect(() => settle(r.balances, r.memberOrder)).toThrow(SettlementInvariantError);
+        }
       }),
     );
   });
 
-  it("공금 원가 보존: Σ입금 원가 = Σ공금 지출 원가 + 남은 원가", () => {
+  it("공금 원가 보존: Σ입금 원가 = Σ공금 지출 원가 − Σ미충당 부족분 + 남은 원가, 풀은 음수가 되지 않는다", () => {
     fc.assert(
       fc.property(tripArb, (trip) => {
         const r = computeBalances(trip);
@@ -83,8 +90,12 @@ describe("속성", () => {
         const spent = trip.expenses
           .filter((e) => e.paidBy.kind === "wallet")
           .reduce((s, e) => s + r.expenseCosts.get(e.id)!, 0n);
+        const deficit = r.wallet.deficits.reduce((s, d) => s + d.costMinor, 0n);
         const left = [...r.wallet.pools.values()].reduce((s, p) => s + p.costMinor, 0n);
-        expect(spent + left).toBe(contributed);
+        expect(spent - deficit + left).toBe(contributed);
+        for (const p of r.wallet.pools.values()) {
+          expect(p.foreignMinor >= 0n && p.costMinor >= 0n).toBe(true);
+        }
       }),
     );
   });
@@ -105,7 +116,10 @@ describe("속성", () => {
           contributions: shuffle(trip.contributions),
         });
         expect(b.balances).toEqual(a.balances);
-        expect(settle(b.balances, b.memberOrder)).toEqual(settle(a.balances, a.memberOrder));
+        expect(b.unfunded).toEqual(a.unfunded);
+        if (a.unfunded.length === 0) {
+          expect(settle(b.balances, b.memberOrder)).toEqual(settle(a.balances, a.memberOrder));
+        }
       }),
     );
   });

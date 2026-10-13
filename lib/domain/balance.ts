@@ -63,6 +63,12 @@ export interface BalanceResult {
   wallet: WalletReplay;
   /** 통화 → 남은 공금을 누가 얼마 가져가는지 */
   leftoverShares: Map<string, LeftoverShare[]>;
+  /**
+   * 입금으로 메워지지 않은 공금 부족분 (통화별 합).
+   * 누가 대납했는지 엔진은 알 수 없으므로 누구에게도 크레딧하지 않는다.
+   * 비어 있지 않으면 Σbalances = −Σunfunded.costMinor 이고, settle()은 거부한다.
+   */
+  unfunded: { currency: string; foreignMinor: bigint; costMinor: bigint }[];
 }
 
 export function memberOrderOf(members: readonly MemberInput[]): string[] {
@@ -158,7 +164,7 @@ export function computeBalances(input: TripInput): BalanceResult {
     }
     let weights: Weighted[] = [...byMember].map(([memberId, weight]) => ({ memberId, weight }));
     if (weights.reduce((s, w) => s + w.weight, 0n) === 0n) {
-      // 입금 기록 없이 공금을 쓴 경우: 전원 균등
+      // 입금 원가가 모두 0인 경우(무상 입금 등): 전원 균등
       weights = order.map((memberId) => ({ memberId, weight: 1n }));
     }
     const seed = `leftover:${currency}`;
@@ -174,8 +180,20 @@ export function computeBalances(input: TripInput): BalanceResult {
     leftoverShares.set(currency, shares);
   }
 
-  const sum = [...balances.values()].reduce((s, v) => s + v, 0n);
-  if (sum !== 0n) throw new SettlementInvariantError(`순잔액 합이 0이 아닙니다: ${sum}`);
+  const unfundedByCurrency = new Map<string, { currency: string; foreignMinor: bigint; costMinor: bigint }>();
+  for (const d of wallet.deficits) {
+    const u = unfundedByCurrency.get(d.currency) ?? { currency: d.currency, foreignMinor: 0n, costMinor: 0n };
+    u.foreignMinor += d.foreignMinor;
+    u.costMinor += d.costMinor;
+    unfundedByCurrency.set(d.currency, u);
+  }
+  const unfunded = [...unfundedByCurrency.values()].sort((a, b) => (a.currency < b.currency ? -1 : 1));
 
-  return { memberOrder: order, balances, expenseCosts, wallet, leftoverShares };
+  const sum = [...balances.values()].reduce((s, v) => s + v, 0n);
+  const unfundedCost = unfunded.reduce((s, u) => s + u.costMinor, 0n);
+  if (sum + unfundedCost !== 0n) {
+    throw new SettlementInvariantError(`순잔액 합이 맞지 않습니다: ${sum} (부족분 ${unfundedCost})`);
+  }
+
+  return { memberOrder: order, balances, expenseCosts, wallet, leftoverShares, unfunded };
 }

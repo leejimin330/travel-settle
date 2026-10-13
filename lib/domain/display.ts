@@ -1,10 +1,11 @@
 import type { BalanceResult, ExpenseInput } from "./balance";
 import { getCurrency } from "./currency";
+import { InvalidRateError } from "./errors";
 import { RATE_SCALE, divRound, pow10, type Rate } from "./fixed";
 import type { Money } from "./money";
 import type { Transfer } from "./settle";
 
-/** 원가 합 ÷ 외화 합 → Rate. 외화 합이 0 이하이면 null */
+/** 원가 합 ÷ 외화 합 → Rate. 외화 합이나 결과 환율이 0 이하이면 null */
 export function averageRate(
   costMinor: bigint,
   foreignMinor: bigint,
@@ -14,7 +15,8 @@ export function averageRate(
   if (foreignMinor <= 0n) return null;
   const f = getCurrency(foreignCurrency);
   const b = getCurrency(baseCurrency);
-  return divRound(costMinor * RATE_SCALE * pow10(f.minorUnits), foreignMinor * pow10(b.minorUnits));
+  const rate = divRound(costMinor * RATE_SCALE * pow10(f.minorUnits), foreignMinor * pow10(b.minorUnits));
+  return rate > 0n ? rate : null;
 }
 
 /**
@@ -50,6 +52,7 @@ export function baseToForeign(
   rate: Rate,
   foreignCurrency: string,
 ): Money {
+  if (rate <= 0n) throw new InvalidRateError(`환율은 0보다 커야 합니다: ${rate}`);
   const f = getCurrency(foreignCurrency);
   const b = getCurrency(baseCurrency);
   const step = pow10(f.minorUnits - f.displayDigits);

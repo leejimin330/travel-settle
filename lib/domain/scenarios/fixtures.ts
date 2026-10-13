@@ -96,7 +96,7 @@ export function scenario2(): TripInput {
     participants: everyone(who),
     overdraftRate: null,
   });
-  const api = parseRate("43.5");
+  const api = parseRate("43.5", 1);
   return {
     baseCurrency: "KRW",
     members: members(ids),
@@ -105,7 +105,7 @@ export function scenario2(): TripInput {
       personal("d1-dinner", "M01", "4500", ids.slice(0, 12), 1, {
         amount: twd("4500"),
         baseCurrency: "KRW",
-        fundingSource: { currency: "TWD", rate: parseRate("43"), feeRate: 0n },
+        fundingSource: { currency: "TWD", rate: parseRate("43", 1), feeRate: 0n },
       }),
       personal("d2-bus", "M02", "3000", ids, 2, {
         amount: twd("3000"),
@@ -131,7 +131,7 @@ export function scenario3(): TripInput {
       id,
       amount: a,
       paidBy: { kind: "member", memberId: "S" },
-      baseCost: resolveCost({ amount: a, baseCurrency: "KRW", apiRate: parseRate(rate) }).base.amountMinor,
+      baseCost: resolveCost({ amount: a, baseCurrency: "KRW", apiRate: parseRate(rate, 1) }).base.amountMinor,
       occurredAt: at(day),
       createdAt: at(day),
       splitType: "equal",

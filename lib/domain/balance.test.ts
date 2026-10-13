@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { computeBalances, memberOrderOf, type ExpenseInput, type TripInput } from "./balance";
-import { InvalidAmountError, UnknownMemberError } from "./errors";
+import { InvalidAmountError, SettlementInvariantError, UnknownMemberError } from "./errors";
 import { parseRate } from "./fixed";
 import { money } from "./money";
+import { settle } from "./settle";
 
 const at = (day: number) => `2026-11-0${day}T00:00:00.000Z`;
 const all = (ids: string[]) => ids.map((memberId) => ({ memberId, value: 0n }));
@@ -154,7 +155,7 @@ describe("computeBalances", () => {
     expect(r.balances).toEqual(new Map([["A", -90_000n], ["B", 90_000n]]));
   });
 
-  it("입금 없이 공금을 쓴 경우(잔액 부족) 음수 잔여는 전원 균등", () => {
+  it("메워지지 않은 공금 부족분은 아무에게도 크레딧하지 않고 unfunded로 보고, 정산을 막는다 (최종 리뷰 #3)", () => {
     const r = computeBalances(
       trip({
         expenses: [
@@ -173,7 +174,41 @@ describe("computeBalances", () => {
       }),
     );
     expect(r.wallet.overdrawn).toEqual(["w1"]);
-    expect(r.balances).toEqual(new Map([["A", -4_500n], ["B", 4_500n]]));
+    // 누가 대납했는지 엔진은 모른다 → B에게 크레딧을 주지 않는다
+    expect(r.balances).toEqual(new Map([["A", -9_000n], ["B", 0n]]));
+    expect(r.unfunded).toEqual([{ currency: "JPY", foreignMinor: 1_000n, costMinor: 9_000n }]);
+    expect(r.leftoverShares.size).toBe(0);
+    expect(() => settle(r.balances, r.memberOrder)).toThrow(SettlementInvariantError);
+  });
+
+  it("먼저 쓴 공금을 나중 입금이 메우면 입금한 사람이 손해 보지 않는다 (최종 리뷰 #1 예시)", () => {
+    const usdSpend = (id: string, cents: bigint, day: number, who: string[]): ExpenseInput => ({
+      id,
+      amount: money(cents, "USD"),
+      paidBy: { kind: "wallet" },
+      baseCost: null,
+      occurredAt: at(day),
+      createdAt: at(day),
+      splitType: "equal",
+      participants: all(who),
+      overdraftRate: parseRate("1400", 1),
+    });
+    const r = computeBalances(
+      trip({
+        members: [
+          { id: "A", sortOrder: 0 },
+          { id: "B", sortOrder: 1 },
+          { id: "C", sortOrder: 2 },
+        ],
+        expenses: [usdSpend("e1", 10_000n, 1, ["A"]), usdSpend("e2", 1_000n, 4, ["B", "C"])],
+        contributions: [
+          { id: "cA", memberId: "A", amount: money(10_000n, "USD"), baseCost: 130_000n, occurredAt: at(2), createdAt: at(2) },
+          { id: "cB", memberId: "B", amount: money(1_000n, "USD"), baseCost: 13_000n, occurredAt: at(3), createdAt: at(3) },
+        ],
+      }),
+    );
+    expect(r.unfunded).toEqual([]);
+    expect(r.balances).toEqual(new Map([["A", 0n], ["B", 6_500n], ["C", -6_500n]]));
   });
 
   it("공금 외 지출에 원가가 없으면 거부", () => {

@@ -39,8 +39,8 @@ function parseDecimal(input: string, scaleDigits: number): bigint {
   return BigInt(intPart) * pow10(scaleDigits) + BigInt(frac.padEnd(scaleDigits, "0") || "0");
 }
 
-/** "905.12" (quoteUnit 단위당 원화) → 1 단위당 Rate */
-export function parseRate(input: string, quoteUnit: 1 | 100 = 1): Rate {
+/** "905.12" (quoteUnit 단위당 원화) → 1 단위당 Rate. quoteUnit은 getCurrency(code).quoteUnit 을 넘긴다 */
+export function parseRate(input: string, quoteUnit: 1 | 100): Rate {
   const v = parseDecimal(input, 10);
   if (v <= 0n) throw new InvalidRateError(`환율은 0보다 커야 합니다: "${input}"`);
   return quoteUnit === 1 ? v : divRound(v, BigInt(quoteUnit));

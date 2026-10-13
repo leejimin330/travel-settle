@@ -37,8 +37,15 @@ describe("divRound (half away from zero)", () => {
 
 describe("parseRate", () => {
   it("1 단위당 환율을 10^10 배 정수로", () => {
-    expect(parseRate("43.5")).toBe(435_000_000_000n);
-    expect(parseRate("1,500")).toBe(1500n * RATE_SCALE);
+    expect(parseRate("43.5", 1)).toBe(435_000_000_000n);
+    expect(parseRate("1,500", 1)).toBe(1500n * RATE_SCALE);
+  });
+
+  it("호가 단위는 생략할 수 없다 — 엔화를 1엔당으로 잘못 넣는 실수 방지 (최종 리뷰 #5)", () => {
+    // 실행하지 않고 타입만 검사한다 (tsc가 이 줄의 오류를 기대함)
+    // @ts-expect-error quoteUnit 필수
+    const call = () => parseRate("905");
+    expect(typeof call).toBe("function");
   });
 
   it("JPY처럼 100 단위 호가는 1 단위로 바꾼다", () => {
@@ -46,7 +53,7 @@ describe("parseRate", () => {
   });
 
   it.each(["0", "-1", "abc", "", "1.12345678901"])("잘못된 값 %j 은 거부", (s) => {
-    expect(() => parseRate(s)).toThrow(InvalidRateError);
+    expect(() => parseRate(s, 1)).toThrow(InvalidRateError);
   });
 });
 
@@ -66,10 +73,10 @@ describe("convertMinor", () => {
   });
 
   it("자릿수가 다른 통화: 120.50 EUR × 1500 = 180,750원", () => {
-    expect(convertMinor(12_050n, 2, 0, parseRate("1500"))).toBe(180_750n);
+    expect(convertMinor(12_050n, 2, 0, parseRate("1500", 1))).toBe(180_750n);
   });
 
   it("TWD는 minor 2자리: 4,500 TWD(450000) × 43 = 193,500원", () => {
-    expect(convertMinor(450_000n, 2, 0, parseRate("43"))).toBe(193_500n);
+    expect(convertMinor(450_000n, 2, 0, parseRate("43", 1))).toBe(193_500n);
   });
 });

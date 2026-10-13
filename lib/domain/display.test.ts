@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeBalances, type TripInput } from "./balance";
 import { averageRate, baseToForeign, describeTransfers, tripAverageRate } from "./display";
+import { InvalidRateError } from "./errors";
 import { parseRate } from "./fixed";
 import { money } from "./money";
 
@@ -13,8 +14,11 @@ describe("averageRate", () => {
   it("외화 합이 0 이하이면 null", () => {
     expect(averageRate(1n, 0n, "JPY", "KRW")).toBeNull();
   });
+  it("원가 합이 0 이하이면(무상 입금 등) null — 0 환율로 나누지 않게 (최종 리뷰 #4)", () => {
+    expect(averageRate(0n, 100n, "JPY", "KRW")).toBeNull();
+  });
   it("자릿수가 다른 통화: 180,750원 / 120.50 EUR = 1500", () => {
-    expect(averageRate(180_750n, 12_050n, "EUR", "KRW")).toBe(parseRate("1500"));
+    expect(averageRate(180_750n, 12_050n, "EUR", "KRW")).toBe(parseRate("1500", 1));
   });
 });
 
@@ -23,10 +27,13 @@ describe("baseToForeign", () => {
     expect(baseToForeign(23_684n, "KRW", parseRate("890", 100), "JPY")).toEqual(money(2_661n, "JPY"));
   });
   it("TWD는 표시 자릿수(0)로 반올림해 minor 2자리로 저장: 10,000원 ÷ 43 = 232.56 → 233 TWD", () => {
-    expect(baseToForeign(10_000n, "KRW", parseRate("43"), "TWD")).toEqual(money(23_300n, "TWD"));
+    expect(baseToForeign(10_000n, "KRW", parseRate("43", 1), "TWD")).toEqual(money(23_300n, "TWD"));
   });
   it("USD는 센트까지: 10,000원 ÷ 1,400 = 7.14", () => {
-    expect(baseToForeign(10_000n, "KRW", parseRate("1400"), "USD")).toEqual(money(714n, "USD"));
+    expect(baseToForeign(10_000n, "KRW", parseRate("1400", 1), "USD")).toEqual(money(714n, "USD"));
+  });
+  it("0 이하 환율은 InvalidRateError (최종 리뷰 #4)", () => {
+    expect(() => baseToForeign(10_000n, "KRW", 0n, "USD")).toThrow(InvalidRateError);
   });
 });
 

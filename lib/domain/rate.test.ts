@@ -43,7 +43,7 @@ describe("resolveCost 우선순위", () => {
     const r = resolveCost({
       amount: yen(10_000n),
       baseCurrency: "KRW",
-      fundingSource: { currency: "USD", rate: parseRate("1400"), feeRate: parseFeePercent("1.5") },
+      fundingSource: { currency: "USD", rate: parseRate("1400", 1), feeRate: parseFeePercent("1.5") },
       apiRate: api,
     });
     expect(r).toMatchObject({ base: money(91_858n, "KRW"), source: "api" });
